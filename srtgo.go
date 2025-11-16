@@ -138,8 +138,16 @@ func newFromSocket(acceptSocket *SrtSocket, socket C.SRTSOCKET) (*SrtSocket, err
 	s.pktSize = acceptSocket.pktSize
 	s.blocking = acceptSocket.blocking
 	s.pollTimeout = acceptSocket.pollTimeout
+	s.options = acceptSocket.options
 
-	err := acceptSocket.postconfiguration(s)
+	// Apply pre-binding options to accepted socket
+	// Some options like tlpktdrop can be set on already-connected sockets
+	err := setSocketOptions(s.socket, bindingPre, s.options)
+	if err != nil {
+		return nil, fmt.Errorf("Error setting pre-bind socket options on accepted socket: %w", err)
+	}
+
+	err = acceptSocket.postconfiguration(s)
 	if err != nil {
 		return nil, err
 	}

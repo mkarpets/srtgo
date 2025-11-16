@@ -1,6 +1,5 @@
 package srtgo
 
-//#include <srt/srt.h>
 import "C"
 
 import (
