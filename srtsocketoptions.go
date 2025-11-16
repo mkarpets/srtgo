@@ -129,60 +129,80 @@ func getSocketLingerOption(s *SrtSocket) (int32, error) {
 	return lin.Linger, nil
 }
 
+// setSingleSocketOption sets a single socket option, returns error if it fails
+func setSingleSocketOption(s C.int, so socketOption, val string) error {
+	if so.dataType == tInteger32 {
+		v, err := strconv.Atoi(val)
+		v32 := int32(v)
+		if err == nil {
+			result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v32), C.int32_t(unsafe.Sizeof(v32)))
+			if result == -1 {
+				return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
+			}
+		}
+	} else if so.dataType == tInteger64 {
+		v, err := strconv.ParseInt(val, 10, 64)
+		if err == nil {
+			result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
+			if result == -1 {
+				return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
+			}
+		}
+	} else if so.dataType == tString {
+		sval := C.CString(val)
+		defer C.free(unsafe.Pointer(sval))
+		result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(sval), C.int32_t(len(val)))
+		if result == -1 {
+			return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
+		}
+	} else if so.dataType == tBoolean {
+		var result C.int
+		if val == "1" {
+			v := C.char(1)
+			result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
+		} else if val == "0" {
+			v := C.char(0)
+			result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
+		}
+		if result == -1 {
+			return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
+		}
+	} else if so.dataType == tTransType {
+		var result C.int
+		if val == "live" {
+			var v int32 = C.SRTT_LIVE
+			result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
+		} else if val == "file" {
+			var v int32 = C.SRTT_FILE
+			result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
+		}
+		if result == -1 {
+			return fmt.Errorf("warning - error setting option %s to %s: %w", so.name, val, srtGetAndClearError())
+		}
+	}
+	return nil
+}
+
+// setSocketOptionsLenient is like setSocketOptions but ignores errors for options
+// that cannot be set on already-connected sockets (for use with accepted sockets)
+func setSocketOptionsLenient(s C.int, binding int, options map[string]string) error {
+	for _, so := range SocketOptions {
+		if val, ok := options[so.name]; ok {
+			if so.binding == binding {
+				_ = setSingleSocketOption(s, so, val) // Ignore errors for incompatible options
+			}
+		}
+	}
+	return nil
+}
+
 // Set socket options for SRT
 func setSocketOptions(s C.int, binding int, options map[string]string) error {
 	for _, so := range SocketOptions {
 		if val, ok := options[so.name]; ok {
 			if so.binding == binding {
-				if so.dataType == tInteger32 {
-					v, err := strconv.Atoi(val)
-					v32 := int32(v)
-					if err == nil {
-						result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v32), C.int32_t(unsafe.Sizeof(v32)))
-						if result == -1 {
-							return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
-						}
-					}
-				} else if so.dataType == tInteger64 {
-					v, err := strconv.ParseInt(val, 10, 64)
-					if err == nil {
-						result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-						if result == -1 {
-							return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
-						}
-					}
-				} else if so.dataType == tString {
-					sval := C.CString(val)
-					defer C.free(unsafe.Pointer(sval))
-					result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(sval), C.int32_t(len(val)))
-					if result == -1 {
-						return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
-					}
-
-				} else if so.dataType == tBoolean {
-					var result C.int
-					if val == "1" {
-						v := C.char(1)
-						result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-					} else if val == "0" {
-						v := C.char(0)
-						result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-					}
-					if result == -1 {
-						return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
-					}
-				} else if so.dataType == tTransType {
-					var result C.int
-					if val == "live" {
-						var v int32 = C.SRTT_LIVE
-						result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-					} else if val == "file" {
-						var v int32 = C.SRTT_FILE
-						result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-					}
-					if result == -1 {
-						return fmt.Errorf("warning - error setting option %s to %s: %w", so.name, val, srtGetAndClearError())
-					}
+				if err := setSingleSocketOption(s, so, val); err != nil {
+					return err
 				}
 			}
 		}

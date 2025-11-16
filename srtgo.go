@@ -140,14 +140,12 @@ func newFromSocket(acceptSocket *SrtSocket, socket C.SRTSOCKET) (*SrtSocket, err
 	s.pollTimeout = acceptSocket.pollTimeout
 	s.options = acceptSocket.options
 
-	// Apply pre-binding options to accepted socket
-	// Some options like tlpktdrop can be set on already-connected sockets
-	err := setSocketOptions(s.socket, bindingPre, s.options)
-	if err != nil {
-		return nil, fmt.Errorf("Error setting pre-bind socket options on accepted socket: %w", err)
-	}
+	// Apply pre-binding options to accepted socket using lenient mode
+	// Some options like tlpktdrop can be set on connected sockets, others like transtype cannot
+	// Use lenient mode to skip options that fail (already negotiated during handshake)
+	setSocketOptionsLenient(s.socket, bindingPre, s.options)
 
-	err = acceptSocket.postconfiguration(s)
+	err := acceptSocket.postconfiguration(s)
 	if err != nil {
 		return nil, err
 	}
