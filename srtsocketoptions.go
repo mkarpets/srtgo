@@ -131,6 +131,7 @@ func getSocketLingerOption(s *SrtSocket) (int32, error) {
 
 // setSingleSocketOption sets a single socket option, returns error if it fails
 func setSingleSocketOption(s C.int, so socketOption, val string) error {
+	fmt.Printf("Setting socket option: %s = %s\n", so.name, val)
 	if so.dataType == tInteger32 {
 		v, err := strconv.Atoi(val)
 		v32 := int32(v)
