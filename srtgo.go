@@ -491,6 +491,42 @@ func (s SrtSocket) getSockOpt(opt int, data unsafe.Pointer, size *int) error {
 	return nil
 }
 
+// DumpSocketOptions returns a formatted string with all current socket option values
+func (s SrtSocket) DumpSocketOptions() string {
+	var result string
+
+	// Key options to dump
+	if val, err := s.GetSockOptBool(SRTO_TLPKTDROP); err == nil {
+		result += fmt.Sprintf("tlpktdrop=%v ", val)
+	}
+	if val, err := s.GetSockOptBool(SRTO_TSBPDMODE); err == nil {
+		result += fmt.Sprintf("tsbpdmode=%v ", val)
+	}
+	if val, err := s.GetSockOptBool(SRTO_NAKREPORT); err == nil {
+		result += fmt.Sprintf("nakreport=%v ", val)
+	}
+	if val, err := s.GetSockOptInt(SRTO_LATENCY); err == nil {
+		result += fmt.Sprintf("latency=%d ", val)
+	}
+	if val, err := s.GetSockOptInt(SRTO_RCVLATENCY); err == nil {
+		result += fmt.Sprintf("rcvlatency=%d ", val)
+	}
+	if val, err := s.GetSockOptInt(SRTO_PEERLATENCY); err == nil {
+		result += fmt.Sprintf("peerlatency=%d ", val)
+	}
+	if val, err := s.GetSockOptInt(SRTO_RCVBUF); err == nil {
+		result += fmt.Sprintf("rcvbuf=%d ", val)
+	}
+	if val, err := s.GetSockOptInt(SRTO_SNDBUF); err == nil {
+		result += fmt.Sprintf("sndbuf=%d ", val)
+	}
+	if val, err := s.GetSockOptInt64(SRTO_MAXBW); err == nil {
+		result += fmt.Sprintf("maxbw=%d ", val)
+	}
+
+	return result
+}
+
 func (s SrtSocket) preconfiguration() (int, error) {
 	var blocking C.int
 	if s.blocking {

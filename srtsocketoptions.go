@@ -189,7 +189,12 @@ func setSocketOptionsLenient(s C.int, binding int, options map[string]string) er
 	for _, so := range SocketOptions {
 		if val, ok := options[so.name]; ok {
 			if so.binding == binding {
-				_ = setSingleSocketOption(s, so, val) // Ignore errors for incompatible options
+				err := setSingleSocketOption(s, so, val)
+				if err != nil {
+					fmt.Printf("setSocketOptionsLenient: option %s=%s failed (likely immutable): %v\n", so.name, val, err)
+				} else {
+					fmt.Printf("setSocketOptionsLenient: option %s=%s set successfully\n", so.name, val)
+				}
 			}
 		}
 	}
