@@ -30,6 +30,39 @@ const (
 	SrtLogLevelTrace   SrtLogLevel = SrtLogLevel(8)
 )
 
+type SrtLogFA int
+
+const (
+	SrtLogFAGeneral   SrtLogFA = 0
+	SrtLogFASockMgmt  SrtLogFA = 1
+	SrtLogFAConn      SrtLogFA = 2
+	SrtLogFAXTimer    SrtLogFA = 3
+	SrtLogFATsbpd     SrtLogFA = 4
+	SrtLogFARsrc      SrtLogFA = 5
+	SrtLogFAHaiCrypt  SrtLogFA = 6
+	SrtLogFACongest   SrtLogFA = 7
+	SrtLogFAPFilter   SrtLogFA = 8
+	SrtLogFAAppLog    SrtLogFA = 10
+	SrtLogFAAPICtrl   SrtLogFA = 11
+	SrtLogFAQueCtrl   SrtLogFA = 13
+	SrtLogFAEPollUpd  SrtLogFA = 16
+	SrtLogFAAPIRecv   SrtLogFA = 21
+	SrtLogFABufRecv   SrtLogFA = 22
+	SrtLogFAQueRecv   SrtLogFA = 23
+	SrtLogFAChnRecv   SrtLogFA = 24
+	SrtLogFAGrpRecv   SrtLogFA = 25
+	SrtLogFAAPISend   SrtLogFA = 31
+	SrtLogFABufSend   SrtLogFA = 32
+	SrtLogFAQueSend   SrtLogFA = 33
+	SrtLogFAChnSend   SrtLogFA = 34
+	SrtLogFAGrpSend   SrtLogFA = 35
+	SrtLogFAInternal  SrtLogFA = 41
+	SrtLogFAQueMgmt   SrtLogFA = 43
+	SrtLogFAChnMgmt   SrtLogFA = 44
+	SrtLogFAGrpMgmt   SrtLogFA = 45
+	SrtLogFAEPollAPI  SrtLogFA = 46
+)
+
 var (
 	logCBPtr     unsafe.Pointer = nil
 	logCBPtrLock sync.Mutex
@@ -65,4 +98,25 @@ func storeLogCBPtr(ptr unsafe.Pointer) {
 		gopointer.Unref(logCBPtr)
 	}
 	logCBPtr = ptr
+}
+
+func SrtAddLogFA(fa SrtLogFA) {
+	C.srt_addlogfa(C.int(fa))
+}
+
+func SrtDelLogFA(fa SrtLogFA) {
+	C.srt_dellogfa(C.int(fa))
+}
+
+func SrtResetLogFA(falist []SrtLogFA) {
+	if len(falist) == 0 {
+		C.srt_resetlogfa(nil, 0)
+		return
+	}
+
+	cArray := make([]C.int, len(falist))
+	for i, fa := range falist {
+		cArray[i] = C.int(fa)
+	}
+	C.srt_resetlogfa(&cArray[0], C.size_t(len(cArray)))
 }
