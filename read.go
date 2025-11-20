@@ -58,3 +58,50 @@ func (s SrtSocket) Read(b []byte) (n int, err error) {
 
 	return
 }
+
+// ReadBatch attempts to read multiple packets in a batched manner to reduce syscall overhead
+// It tries to read up to maxPackets into the provided buffer slice
+// Returns the number of packets successfully read
+// This is useful for high-throughput scenarios where reducing syscall overhead is critical
+func (s SrtSocket) ReadBatch(buffer []byte, maxPackets int) (packetsRead int, totalBytes int, err error) {
+	if maxPackets <= 0 || len(buffer) == 0 {
+		return 0, 0, nil
+	}
+
+	offset := 0
+	for packetsRead = 0; packetsRead < maxPackets && offset < len(buffer); packetsRead++ {
+		// Try to read a packet
+		n, readErr := srtRecvMsg2Impl(s.socket, buffer[offset:], nil)
+
+		if readErr != nil {
+			// If this is the first packet and we got ASYNCRCV, wait for data
+			if packetsRead == 0 && !s.blocking && errors.Is(readErr, error(EAsyncRCV)) {
+				s.pd.reset(ModeRead)
+				if waitErr := s.pd.wait(ModeRead); waitErr != nil {
+					return 0, 0, waitErr
+				}
+				// Try one more time after waiting
+				n, readErr = srtRecvMsg2Impl(s.socket, buffer[offset:], nil)
+			}
+
+			if readErr != nil {
+				// If we've read at least one packet successfully, return those
+				// Otherwise return the error
+				if packetsRead > 0 {
+					return packetsRead, totalBytes, nil
+				}
+				return 0, 0, readErr
+			}
+		}
+
+		if n == 0 {
+			// No more data available
+			break
+		}
+
+		offset += n
+		totalBytes += n
+	}
+
+	return packetsRead, totalBytes, nil
+}
