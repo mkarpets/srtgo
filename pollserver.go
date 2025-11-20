@@ -74,8 +74,10 @@ func (p *pollServer) run() {
 	// Use a reasonable timeout instead of infinite to prevent busy waiting
 	// and allow for graceful shutdown
 	timeoutMs := C.int64_t(100) // 100ms timeout
-	fds := [128]C.SRT_EPOLL_EVENT{}
-	fdlen := C.int(128)
+	// Increased from 128 to 512 to handle high-throughput scenarios (60k+ packets/sec)
+	// Larger batch size reduces epoll syscall overhead
+	fds := [512]C.SRT_EPOLL_EVENT{}
+	fdlen := C.int(512)
 
 	for {
 		res := C.srt_epoll_uwait(p.srtEpollDescr, &fds[0], fdlen, timeoutMs)
