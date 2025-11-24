@@ -133,6 +133,7 @@ func getSocketLingerOption(s *SrtSocket) (int32, error) {
 func setSocketOptions(s C.int, binding int, options map[string]string) error {
 	for _, so := range SocketOptions {
 		if val, ok := options[so.name]; ok {
+			fmt.Printf("setting option %s to %s\n", so.name, val)
 			if so.binding == binding {
 				if so.dataType == tInteger32 {
 					v, err := strconv.Atoi(val)

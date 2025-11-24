@@ -93,6 +93,10 @@ type SrtStats struct {
 	PktRcvFilterSupply  int // number of packets that the filter supplied extra (e.g. FEC rebuilt)
 	PktRcvFilterLoss    int // number of packet loss not coverable by filter
 	PktReorderTolerance int // packet reorder tolerance value
+
+	UsFecRebuildTimeTotal int64   // Total microseconds spent in FEC rebuild (RS decode)
+	PktFecRebuiltTotal    int     // Total number of groups that required FEC rebuild
+	UsFecAvgRebuildTime   float64 // Average FEC rebuild time in microseconds
 }
 
 func newSrtStats(stats *C.SRT_TRACEBSTATS) *SrtStats {
@@ -183,6 +187,10 @@ func newSrtStats(stats *C.SRT_TRACEBSTATS) *SrtStats {
 	s.PktRcvFilterSupply = int(stats.pktRcvFilterSupply)
 	s.PktRcvFilterLoss = int(stats.pktRcvFilterLoss)
 	s.PktReorderTolerance = int(stats.pktReorderTolerance)
+
+	s.UsFecRebuildTimeTotal = int64(stats.usFecRebuildTimeTotal)
+	s.PktFecRebuiltTotal = int(stats.pktFecRebuiltTotal)
+	s.UsFecAvgRebuildTime = float64(stats.usFecAvgRebuildTime)
 
 	return s
 }
