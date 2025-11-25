@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -56,49 +57,93 @@ const (
 	SRTO_PEERIDLETIMEO      = C.SRTO_PEERIDLETIMEO
 	SRTO_PACKETFILTER       = C.SRTO_PACKETFILTER
 	SRTO_STATE              = C.SRTO_STATE
+	SRTO_UDP_RCVBUF         = C.SRTO_UDP_RCVBUF
+	SRTO_UDP_SNDBUF         = C.SRTO_UDP_SNDBUF
+	SRTO_MININPUTBW         = C.SRTO_MININPUTBW
+	SRTO_SENDER             = C.SRTO_SENDER
+	SRTO_REUSEADDR          = C.SRTO_REUSEADDR
 )
 
 type socketOption struct {
-	name     string
-	level    int
-	option   int
-	binding  int
-	dataType int
+	name      string
+	level     int
+	option    int
+	lifecycle SrtOptionLifecycle // EXPLICIT lifecycle property - single source of truth
+	dataType  int
+}
+
+// Name returns the option name (accessor for external use)
+func (so socketOption) Name() string {
+	return so.name
+}
+
+// Lifecycle returns the option lifecycle stage (accessor for external use)
+func (so socketOption) Lifecycle() SrtOptionLifecycle {
+	return so.lifecycle
+}
+
+// CanSetAt checks if this option can be set at the given lifecycle stage
+// This encapsulates the lifecycle compatibility logic
+func (so socketOption) CanSetAt(stage SrtOptionLifecycle) bool {
+	// PREBIND options can ONLY be set before bind
+	if so.lifecycle == LifecyclePrebind {
+		return stage == LifecyclePrebind
+	}
+	// PRE options can be set at prebind OR pre stages
+	if so.lifecycle == LifecyclePre {
+		return stage == LifecyclePrebind || stage == LifecyclePre
+	}
+	// POST options can be set at ANY stage
+	return true
 }
 
 // List of possible srt socket options
+// Each option explicitly declares its lifecycle requirement
 var SocketOptions = []socketOption{
-	{"transtype", 0, SRTO_TRANSTYPE, bindingPre, tTransType},
-	{"maxbw", 0, SRTO_MAXBW, bindingPre, tInteger64},
-	{"pbkeylen", 0, SRTO_PBKEYLEN, bindingPre, tInteger32},
-	{"passphrase", 0, SRTO_PASSPHRASE, bindingPre, tString},
-	{"mss", 0, SRTO_MSS, bindingPre, tInteger32},
-	{"fc", 0, SRTO_FC, bindingPre, tInteger32},
-	{"sndbuf", 0, SRTO_SNDBUF, bindingPre, tInteger32},
-	{"rcvbuf", 0, SRTO_RCVBUF, bindingPre, tInteger32},
-	{"ipttl", 0, SRTO_IPTTL, bindingPre, tInteger32},
-	{"iptos", 0, SRTO_IPTOS, bindingPre, tInteger32},
-	{"inputbw", 0, SRTO_INPUTBW, bindingPost, tInteger64},
-	{"oheadbw", 0, SRTO_OHEADBW, bindingPost, tInteger32},
-	{"latency", 0, SRTO_LATENCY, bindingPre, tInteger32},
-	{"tsbpdmode", 0, SRTO_TSBPDMODE, bindingPre, tBoolean},
-	{"tlpktdrop", 0, SRTO_TLPKTDROP, bindingPre, tBoolean},
-	{"snddropdelay", 0, SRTO_SNDDROPDELAY, bindingPost, tInteger32},
-	{"nakreport", 0, SRTO_NAKREPORT, bindingPre, tBoolean},
-	{"conntimeo", 0, SRTO_CONNTIMEO, bindingPre, tInteger32},
-	{"lossmaxttl", 0, SRTO_LOSSMAXTTL, bindingPre, tInteger32},
-	{"rcvlatency", 0, SRTO_RCVLATENCY, bindingPre, tInteger32},
-	{"peerlatency", 0, SRTO_PEERLATENCY, bindingPre, tInteger32},
-	{"minversion", 0, SRTO_MINVERSION, bindingPre, tInteger32},
-	{"streamid", 0, SRTO_STREAMID, bindingPre, tString},
-	{"congestion", 0, SRTO_CONGESTION, bindingPre, tString},
-	{"messageapi", 0, SRTO_MESSAGEAPI, bindingPre, tBoolean},
-	{"payloadsize", 0, SRTO_PAYLOADSIZE, bindingPre, tInteger32},
-	{"kmrefreshrate", 0, SRTO_KMREFRESHRATE, bindingPre, tInteger32},
-	{"kmpreannounce", 0, SRTO_KMPREANNOUNCE, bindingPre, tInteger32},
-	{"enforcedencryption", 0, SRTO_ENFORCEDENCRYPTION, bindingPre, tBoolean},
-	{"peeridletimeo", 0, SRTO_PEERIDLETIMEO, bindingPre, tInteger32},
-	{"packetfilter", 0, SRTO_PACKETFILTER, bindingPre, tString},
+	// ===== PREBIND OPTIONS (SRTO_R_PREBIND) =====
+	// These affect buffer allocation and binding behavior
+	{"mss", 0, SRTO_MSS, LifecyclePrebind, tInteger32},
+	{"sndbuf", 0, SRTO_SNDBUF, LifecyclePrebind, tInteger32},
+	{"rcvbuf", 0, SRTO_RCVBUF, LifecyclePrebind, tInteger32},
+	{"udp_sndbuf", 0, SRTO_UDP_SNDBUF, LifecyclePrebind, tInteger32},
+	{"udp_rcvbuf", 0, SRTO_UDP_RCVBUF, LifecyclePrebind, tInteger32},
+	{"ipttl", 0, SRTO_IPTTL, LifecyclePrebind, tInteger32},
+	{"iptos", 0, SRTO_IPTOS, LifecyclePrebind, tInteger32},
+	{"reuseaddr", 0, SRTO_REUSEADDR, LifecyclePrebind, tBoolean},
+	{"transtype", 0, SRTO_TRANSTYPE, LifecyclePrebind, tTransType},
+
+	// ===== PRE OPTIONS (SRTO_R_PRE) =====
+	// These affect handshake, encryption, connection negotiation
+	{"fc", 0, SRTO_FC, LifecyclePre, tInteger32},
+	{"sender", 0, SRTO_SENDER, LifecyclePre, tBoolean},
+	{"tsbpdmode", 0, SRTO_TSBPDMODE, LifecyclePre, tBoolean},
+	{"latency", 0, SRTO_LATENCY, LifecyclePre, tInteger32},
+	{"rcvlatency", 0, SRTO_RCVLATENCY, LifecyclePre, tInteger32},
+	{"peerlatency", 0, SRTO_PEERLATENCY, LifecyclePre, tInteger32},
+	{"passphrase", 0, SRTO_PASSPHRASE, LifecyclePre, tString},
+	{"pbkeylen", 0, SRTO_PBKEYLEN, LifecyclePre, tInteger32},
+	{"tlpktdrop", 0, SRTO_TLPKTDROP, LifecyclePre, tBoolean},
+	{"nakreport", 0, SRTO_NAKREPORT, LifecyclePre, tBoolean},
+	{"conntimeo", 0, SRTO_CONNTIMEO, LifecyclePre, tInteger32},
+	{"streamid", 0, SRTO_STREAMID, LifecyclePre, tString},
+	{"payloadsize", 0, SRTO_PAYLOADSIZE, LifecyclePre, tInteger32},
+	{"messageapi", 0, SRTO_MESSAGEAPI, LifecyclePre, tBoolean},
+	{"minversion", 0, SRTO_MINVERSION, LifecyclePre, tInteger32},
+	{"enforcedencryption", 0, SRTO_ENFORCEDENCRYPTION, LifecyclePre, tBoolean},
+	{"peeridletimeo", 0, SRTO_PEERIDLETIMEO, LifecyclePre, tInteger32},
+	{"packetfilter", 0, SRTO_PACKETFILTER, LifecyclePre, tString},
+	{"congestion", 0, SRTO_CONGESTION, LifecyclePre, tString},
+	{"kmrefreshrate", 0, SRTO_KMREFRESHRATE, LifecyclePre, tInteger32},
+	{"kmpreannounce", 0, SRTO_KMPREANNOUNCE, LifecyclePre, tInteger32},
+
+	// ===== POST OPTIONS (no restriction flags) =====
+	// These can be adjusted anytime - bandwidth, loss handling, timeouts
+	{"maxbw", 0, SRTO_MAXBW, LifecyclePost, tInteger64},
+	{"inputbw", 0, SRTO_INPUTBW, LifecyclePost, tInteger64},
+	{"mininputbw", 0, SRTO_MININPUTBW, LifecyclePost, tInteger64},
+	{"oheadbw", 0, SRTO_OHEADBW, LifecyclePost, tInteger32},
+	{"snddropdelay", 0, SRTO_SNDDROPDELAY, LifecyclePost, tInteger32},
+	{"lossmaxttl", 0, SRTO_LOSSMAXTTL, LifecyclePost, tInteger32},
 }
 
 func setSocketLingerOption(s C.int, li int32) error {
@@ -129,64 +174,122 @@ func getSocketLingerOption(s *SrtSocket) (int32, error) {
 	return lin.Linger, nil
 }
 
-// Set socket options for SRT
-func setSocketOptions(s C.int, binding int, options map[string]string) error {
-	for _, so := range SocketOptions {
-		if val, ok := options[so.name]; ok {
-			fmt.Printf("setting option %s to %s\n", so.name, val)
-			if so.binding == binding {
-				if so.dataType == tInteger32 {
-					v, err := strconv.Atoi(val)
-					v32 := int32(v)
-					if err == nil {
-						result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v32), C.int32_t(unsafe.Sizeof(v32)))
-						if result == -1 {
-							return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
-						}
-					}
-				} else if so.dataType == tInteger64 {
-					v, err := strconv.ParseInt(val, 10, 64)
-					if err == nil {
-						result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-						if result == -1 {
-							return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
-						}
-					}
-				} else if so.dataType == tString {
-					sval := C.CString(val)
-					defer C.free(unsafe.Pointer(sval))
-					result := C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(sval), C.int32_t(len(val)))
-					if result == -1 {
-						return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
-					}
+// setSocketOption sets a single socket option based on its data type
+func setSocketOption(socket C.int, optDef *socketOption, val string) error {
+	switch optDef.dataType {
+	case tInteger32:
+		v, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid integer value: %w", err)
+		}
+		v32 := int32(v)
+		result := C.srt_setsockflag(socket, C.SRT_SOCKOPT(optDef.option), unsafe.Pointer(&v32), C.int32_t(unsafe.Sizeof(v32)))
+		if result == -1 {
+			return srtGetAndClearError()
+		}
 
-				} else if so.dataType == tBoolean {
-					var result C.int
-					if val == "1" {
-						v := C.char(1)
-						result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-					} else if val == "0" {
-						v := C.char(0)
-						result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-					}
-					if result == -1 {
-						return fmt.Errorf("warning - error setting option %s to %s, %w", so.name, val, srtGetAndClearError())
-					}
-				} else if so.dataType == tTransType {
-					var result C.int
-					if val == "live" {
-						var v int32 = C.SRTT_LIVE
-						result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-					} else if val == "file" {
-						var v int32 = C.SRTT_FILE
-						result = C.srt_setsockflag(s, C.SRT_SOCKOPT(so.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
-					}
-					if result == -1 {
-						return fmt.Errorf("warning - error setting option %s to %s: %w", so.name, val, srtGetAndClearError())
-					}
-				}
+	case tInteger64:
+		v, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid integer64 value: %w", err)
+		}
+		result := C.srt_setsockflag(socket, C.SRT_SOCKOPT(optDef.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
+		if result == -1 {
+			return srtGetAndClearError()
+		}
+
+	case tString:
+		sval := C.CString(val)
+		defer C.free(unsafe.Pointer(sval))
+		result := C.srt_setsockflag(socket, C.SRT_SOCKOPT(optDef.option), unsafe.Pointer(sval), C.int32_t(len(val)))
+		if result == -1 {
+			return srtGetAndClearError()
+		}
+
+	case tBoolean:
+		var v C.char
+		if val == "1" || val == "true" {
+			v = C.char(1)
+		} else if val == "0" || val == "false" {
+			v = C.char(0)
+		} else {
+			return fmt.Errorf("invalid boolean value: %s", val)
+		}
+		result := C.srt_setsockflag(socket, C.SRT_SOCKOPT(optDef.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
+		if result == -1 {
+			return srtGetAndClearError()
+		}
+
+	case tTransType:
+		var v int32
+		if val == "live" {
+			v = C.SRTT_LIVE
+		} else if val == "file" {
+			v = C.SRTT_FILE
+		} else {
+			return fmt.Errorf("invalid transtype value: %s (must be 'live' or 'file')", val)
+		}
+		result := C.srt_setsockflag(socket, C.SRT_SOCKOPT(optDef.option), unsafe.Pointer(&v), C.int32_t(unsafe.Sizeof(v)))
+		if result == -1 {
+			return srtGetAndClearError()
+		}
+
+	default:
+		return fmt.Errorf("unsupported data type %d", optDef.dataType)
+	}
+
+	return nil
+}
+
+// setSocketOptionsForLifecycle sets options appropriate for the lifecycle stage
+// It validates each option against its declared lifecycle before setting
+func setSocketOptionsForLifecycle(socket C.int, stage SrtOptionLifecycle, options map[string]string) error {
+	var errors []string
+
+	for name, val := range options {
+		// Find option definition in registry
+		var optDef *socketOption
+		for i := range SocketOptions {
+			if SocketOptions[i].Name() == name {
+				optDef = &SocketOptions[i]
+				break
 			}
 		}
+
+		if optDef == nil {
+			errors = append(errors, fmt.Sprintf("unknown option: %s", name))
+			continue
+		}
+
+		// Verify option can be set at this lifecycle stage
+		if !optDef.CanSetAt(stage) {
+			errors = append(errors, fmt.Sprintf("option '%s' cannot be set at %s stage (requires %s)",
+				name, stage.String(), optDef.Lifecycle().String()))
+			continue
+		}
+
+		// Set the option
+		if err := setSocketOption(socket, optDef, val); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", name, err))
+		}
 	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("socket option errors: %s", strings.Join(errors, "; "))
+	}
+
 	return nil
+}
+
+// Deprecated: setSocketOptions kept for backwards compatibility
+// Use setSocketOptionsForLifecycle instead
+func setSocketOptions(s C.int, binding int, options map[string]string) error {
+	// Convert old binding to lifecycle
+	var stage SrtOptionLifecycle
+	if binding == bindingPre {
+		stage = LifecyclePre
+	} else {
+		stage = LifecyclePost
+	}
+	return setSocketOptionsForLifecycle(s, stage, options)
 }
