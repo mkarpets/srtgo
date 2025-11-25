@@ -302,6 +302,11 @@ func (s *SrtSocket) SetWriteDeadline(deadline time.Time) {
 	s.pd.setDeadline(deadline, ModeWrite)
 }
 
+// Socket returns the underlying C socket for advanced operations
+func (s *SrtSocket) Socket() C.int {
+	return s.socket
+}
+
 // Close the SRT socket
 func (s *SrtSocket) Close() {
 
@@ -341,9 +346,14 @@ func srtListenCBWrapper(arg unsafe.Pointer, socket C.SRTSOCKET, hsVersion C.int,
 // is handed to accept on a listening socket.
 // The connection can be rejected by returning false from the callback.
 // See examples/echo-receiver for more details.
-func (s SrtSocket) SetListenCallback(cb ListenCallbackFunc) {
+func (s SrtSocket) SetListenCallback(cb ListenCallbackFunc) error {
 	ptr := gopointer.Save(cb)
-	C.srt_listen_callback(s.socket, (*C.srt_listen_callback_fn)(C.srtListenCB), ptr)
+	result := C.srt_listen_callback(s.socket, (*C.srt_listen_callback_fn)(C.srtListenCB), ptr)
+
+	if result == SRT_ERROR {
+		gopointer.Unref(ptr)
+		return srtGetAndClearError()
+	}
 
 	callbackMutex.Lock()
 	defer callbackMutex.Unlock()
@@ -351,6 +361,7 @@ func (s SrtSocket) SetListenCallback(cb ListenCallbackFunc) {
 		gopointer.Unref(listenCallbackMap[s.socket])
 	}
 	listenCallbackMap[s.socket] = ptr
+	return nil
 }
 
 // ConnectCallbackFunc specifies a function to be called after a socket or connection in a group has failed.
@@ -369,9 +380,14 @@ func srtConnectCBWrapper(arg unsafe.Pointer, socket C.SRTSOCKET, errcode C.int, 
 
 // SetConnectCallback - set a function to be called after a socket or connection in a group has failed
 // Note that the function is not guaranteed to be called if the socket is set to blocking mode.
-func (s SrtSocket) SetConnectCallback(cb ConnectCallbackFunc) {
+func (s SrtSocket) SetConnectCallback(cb ConnectCallbackFunc) error {
 	ptr := gopointer.Save(cb)
-	C.srt_connect_callback(s.socket, (*C.srt_connect_callback_fn)(C.srtConnectCB), ptr)
+	result := C.srt_connect_callback(s.socket, (*C.srt_connect_callback_fn)(C.srtConnectCB), ptr)
+
+	if result == SRT_ERROR {
+		gopointer.Unref(ptr)
+		return srtGetAndClearError()
+	}
 
 	callbackMutex.Lock()
 	defer callbackMutex.Unlock()
@@ -379,6 +395,7 @@ func (s SrtSocket) SetConnectCallback(cb ConnectCallbackFunc) {
 		gopointer.Unref(connectCallbackMap[s.socket])
 	}
 	connectCallbackMap[s.socket] = ptr
+	return nil
 }
 
 // Rejection reasons

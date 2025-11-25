@@ -281,6 +281,47 @@ func setSocketOptionsForLifecycle(socket C.int, stage SrtOptionLifecycle, option
 	return nil
 }
 
+// FindSocketOption looks up an option by name in the SocketOptions registry
+// Returns nil if the option is not found
+func FindSocketOption(name string) *socketOption {
+	for i := range SocketOptions {
+		if SocketOptions[i].Name() == name {
+			return &SocketOptions[i]
+		}
+	}
+	return nil
+}
+
+// ValidateSocketOptionsForLifecycle validates that options can be set at the given lifecycle stage
+// Returns an error describing any invalid options, without actually setting them
+func ValidateSocketOptionsForLifecycle(stage SrtOptionLifecycle, options map[string]string) error {
+	var errors []string
+
+	for name := range options {
+		optDef := FindSocketOption(name)
+		if optDef == nil {
+			errors = append(errors, fmt.Sprintf("unknown option: %s", name))
+			continue
+		}
+
+		if !optDef.CanSetAt(stage) {
+			errors = append(errors, fmt.Sprintf("option '%s' cannot be set at %s stage (requires %s)",
+				name, stage.String(), optDef.Lifecycle().String()))
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("socket option validation errors: %s", strings.Join(errors, "; "))
+	}
+
+	return nil
+}
+
+// SetSocketOptionsForLifecycle wraps setSocketOptionsForLifecycle for external use
+func SetSocketOptionsForLifecycle(socket C.int, stage SrtOptionLifecycle, options map[string]string) error {
+	return setSocketOptionsForLifecycle(socket, stage, options)
+}
+
 // Deprecated: setSocketOptions kept for backwards compatibility
 // Use setSocketOptionsForLifecycle instead
 func setSocketOptions(s C.int, binding int, options map[string]string) error {
