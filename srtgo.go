@@ -34,7 +34,40 @@ const (
 	ModeRendezvouz
 )
 
-// Binding ops
+// SrtOptionLifecycle represents when a socket option can be set
+// This is based on libsrt's restriction flags: SRTO_R_PREBIND, SRTO_R_PRE, and POST
+type SrtOptionLifecycle int
+
+const (
+	// LifecyclePrebind - Must set before srt_bind() - SRTO_R_PREBIND
+	// These options affect buffer allocation and binding behavior
+	LifecyclePrebind SrtOptionLifecycle = iota
+
+	// LifecyclePre - Must set before srt_connect()/srt_listen() - SRTO_R_PRE
+	// These options affect handshake negotiation, encryption, connection behavior
+	LifecyclePre
+
+	// LifecyclePost - Can set at any time - no restriction flags
+	// These options can be adjusted anytime (bandwidth, loss handling, timeouts)
+	LifecyclePost
+)
+
+// String returns human-readable lifecycle name
+func (l SrtOptionLifecycle) String() string {
+	switch l {
+	case LifecyclePrebind:
+		return "prebind"
+	case LifecyclePre:
+		return "pre"
+	case LifecyclePost:
+		return "post"
+	default:
+		return "unknown"
+	}
+}
+
+// Deprecated binding constants for backwards compatibility
+// Use SrtOptionLifecycle instead
 const (
 	bindingPre  = 0
 	bindingPost = 1
@@ -485,6 +518,61 @@ func (s SrtSocket) getSockOpt(opt int, data unsafe.Pointer, size *int) error {
 	return nil
 }
 
+// applyOptionsForLifecycle applies socket options that are valid for the given lifecycle stage
+// This uses the option registry to filter - no hardcoded option lists!
+func (s *SrtSocket) applyOptionsForLifecycle(stage SrtOptionLifecycle) error {
+	if s.options == nil || len(s.options) == 0 {
+		return nil
+	}
+
+	// Filter options based on what the registry says can be set at this stage
+	applicableOpts := make(map[string]string)
+	for name, value := range s.options {
+		// Find option definition in registry
+		for _, optDef := range SocketOptions {
+			if optDef.Name() == name {
+				// Ask the option if it can be set at this stage
+				if optDef.CanSetAt(stage) {
+					applicableOpts[name] = value
+				}
+				break
+			}
+		}
+	}
+
+	if len(applicableOpts) == 0 {
+		return nil
+	}
+
+	// Apply the filtered options
+	return setSocketOptionsForLifecycle(s.socket, stage, applicableOpts)
+}
+
+// applyPrebindOptions applies PREBIND options (must be called before bind)
+func (s *SrtSocket) applyPrebindOptions() error {
+	return s.applyOptionsForLifecycle(LifecyclePrebind)
+}
+
+// applyPreOptions applies PRE options (must be called before connect/listen)
+func (s *SrtSocket) applyPreOptions() error {
+	return s.applyOptionsForLifecycle(LifecyclePre)
+}
+
+// applyPostOptions applies POST options (can be called at any time)
+func (s *SrtSocket) applyPostOptions() error {
+	return s.applyOptionsForLifecycle(LifecyclePost)
+}
+
+// UpdatePostOptions updates POST options on an already-connected socket
+func (s *SrtSocket) UpdatePostOptions(options map[string]string) error {
+	if options == nil || len(options) == 0 {
+		return nil
+	}
+
+	// Only apply POST options (safe to set on connected sockets)
+	return setSocketOptionsForLifecycle(s.socket, LifecyclePost, options)
+}
+
 func (s SrtSocket) preconfiguration() (int, error) {
 	var blocking C.int
 	if s.blocking {
@@ -533,9 +621,14 @@ func (s SrtSocket) preconfiguration() (int, error) {
 		}
 	}
 
-	err := setSocketOptions(s.socket, bindingPre, s.options)
-	if err != nil {
-		return ModeFailure, fmt.Errorf("Error setting socket options: %w", err)
+	// Apply PREBIND options first (must be set before bind/connect)
+	if err := s.applyPrebindOptions(); err != nil {
+		return ModeFailure, fmt.Errorf("Error setting PREBIND options: %w", err)
+	}
+
+	// Apply PRE options (must be set before listen/connect)
+	if err := s.applyPreOptions(); err != nil {
+		return ModeFailure, fmt.Errorf("Error setting PRE options: %w", err)
 	}
 
 	return mode, nil
@@ -559,6 +652,6 @@ func (s SrtSocket) postconfiguration(sck *SrtSocket) error {
 		return fmt.Errorf("Error in postconfiguration setting SRTO_RCVSYN: %w", srtGetAndClearErrorThreadSafe())
 	}
 
-	err := setSocketOptions(sck.socket, bindingPost, s.options)
-	return err
+	// Apply POST options (can be set anytime, including after connection)
+	return sck.applyPostOptions()
 }
